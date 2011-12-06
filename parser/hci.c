@@ -1126,9 +1126,10 @@ static inline void create_physical_link_dump(int level, struct frame *frm)
 
 	printf("handle %d key length %d key type %d\n",
 		cp->handle, cp->key_length, cp->key_type);
+	p_indent(level, frm);
 	printf("key ");
 
-	for (i = 0; i < cp->key_length && cp->key_length < 32; i++)
+	for (i = 0; i < cp->key_length && cp->key_length <= 32; i++)
 		printf("%2.2x", cp->key[i]);
 	printf("\n");
 }
@@ -1139,12 +1140,16 @@ static inline void create_logical_link_dump(int level, struct frame *frm)
 	int i;
 
 	p_indent(level, frm);
-
 	printf("handle %d\n", cp->handle);
+
+	p_indent(level, frm);
 	printf("tx_flow ");
 	for (i = 0; i < 16; i++)
 		printf("%2.2x", cp->tx_flow[i]);
-	printf("\nrx_flow ");
+	printf("\n");
+
+	p_indent(level, frm);
+	printf("rx_flow ");
 	for (i = 0; i < 16; i++)
 		printf("%2.2x", cp->rx_flow[i]);
 	printf("\n");
@@ -2617,6 +2622,8 @@ static inline void read_local_amp_assoc_dump(int level, struct frame *frm)
 		p_indent(level, frm);
 		printf("Error: %s\n", status2str(rp->status));
 	} else {
+		p_indent(level, frm);
+		printf("assoc data");
 		for (i = 0; i < len; i++) {
 			if (!(i % 16)) {
 				printf("\n");
