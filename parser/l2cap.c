@@ -39,6 +39,7 @@
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/l2cap.h>
+#include <bluetooth/amp.h>
 
 #include "parser.h"
 #include "sdp.h"
@@ -224,6 +225,16 @@ static char *reason2str(uint16_t reason)
 	}
 }
 
+static char *a2mpreason2str(uint16_t reason)
+{
+	switch (reason) {
+	case A2MP_COMMAND_NOT_RECOGNIZED:
+		return "Command not recognized";
+	default:
+		return "Reserved";
+	}
+}
+
 static char *connresult2str(uint16_t result)
 {
 	switch (result) {
@@ -237,6 +248,89 @@ static char *connresult2str(uint16_t result)
 		return "Connection refused - security block";
 	case 0x0004:
 		return "Connection refused - no resources available";
+	default:
+		return "Reserved";
+	}
+}
+
+static char *ampctrltype2str(uint8_t type)
+{
+	switch (type) {
+	case HCI_BREDR:
+		return "BR-EDR";
+	case HCI_AMP:
+		return "802.11 AMP";
+	default:
+		return "Reserved";
+	}
+}
+
+static char *ampctrlstatus2str(uint8_t status)
+{
+	switch (status) {
+	case AMP_CTRL_POWERED_DOWN:
+		return "Powered down";
+	case AMP_CTRL_BLUETOOTH_ONLY:
+		return "Bluetooth only";
+	case AMP_CTRL_NO_CAPACITY:
+		return "No capacity";
+	case AMP_CTRL_LOW_CAPACITY:
+		return "Low capacity";
+	case AMP_CTRL_MEDIUM_CAPACITY:
+		return "Medium capacity";
+	case AMP_CTRL_HIGH_CAPACITY:
+		return "High capacity";
+	case AMP_CTRL_FULL_CAPACITY:
+		return "Full capacity";
+	default:
+		return "Reserved";
+
+	}
+}
+
+static char *a2mpstatus2str(uint8_t status)
+{
+	switch (status) {
+	case A2MP_STATUS_SUCCESS:
+		return "Success";
+	case A2MP_STATUS_INVALID_CTRL_ID:
+		return "Invalid Controller ID";
+	default:
+		return "Reserved";
+	}
+}
+
+static char *a2mpcplstatus2str(uint8_t status)
+{
+	switch (status) {
+	case A2MP_STATUS_SUCCESS:
+		return "Success";
+	case A2MP_STATUS_INVALID_CTRL_ID:
+		return "Invalid Controller ID";
+	case A2MP_STATUS_UNABLE_START_LINK_CREATION:
+		return "Failed - Unable to start link creation";
+	case A2MP_STATUS_COLLISION_OCCURED:
+		return "Failed - Collision occured";
+	case A2MP_STATUS_DISCONN_REQ_RECVD:
+		return "Failed - Disconnect physical link received";
+	case A2MP_STATUS_PHYS_LINK_EXISTS:
+		return "Failed - Physical link already exists";
+	case A2MP_STATUS_SECURITY_VIOLATION:
+		return "Failed - Security violation";
+	default:
+		return "Reserved";
+	}
+}
+
+static char *a2mpdplstatus2str(uint8_t status)
+{
+	switch (status) {
+	case A2MP_STATUS_SUCCESS:
+		return "Success";
+	case A2MP_STATUS_INVALID_CTRL_ID:
+		return "Invalid Controller ID";
+	case A2MP_STATUS_NO_PHYSICAL_LINK_EXISTS:
+		return "Failed - No Physical Link exists";
 	default:
 		return "Reserved";
 	}
@@ -383,6 +477,195 @@ static inline void command_rej(int level, struct frame *frm)
 
 	p_indent(level + 1, frm);
 	printf("%s\n", reason2str(reason));
+}
+
+static inline void a2mp_command_rej(int level, struct frame *frm)
+{
+	struct a2mp_command_rej *h = frm->ptr;
+	uint16_t reason = btohs(h->reason);
+
+	printf("Command Reject: reason %d\n", reason);
+	p_indent(level + 1, 0);
+	printf("%s\n", a2mpreason2str(reason));
+}
+
+static inline void a2mp_discover_req(int level, struct frame *frm, uint16_t len)
+{
+	struct a2mp_discover_req *h = frm->ptr;
+	uint16_t mtu = btohs(h->mtu);
+	uint8_t  *octet = (uint8_t *)&(h->mask);
+	uint16_t mask;
+	uint8_t  extension;
+
+	printf("Discover req: mtu/mps %d ", mtu);
+	len -= 2;
+
+	printf("mask:");
+
+	do {
+		len -= 2;
+		mask = btohs(*(uint16_t *)(&octet[0]));
+		printf(" 0x%4.4x", mask);
+
+		extension = octet[1] & 0x80;
+		octet += 2;
+	} while ((extension != 0) && (len >= 2));
+
+	printf("\n");
+}
+
+static inline void a2mp_ctrl_list_dump(int level, struct a2mp_ctrl *list, uint16_t len)
+{
+	p_indent(level, 0);
+	printf("Controller list:\n");
+
+	while (len >= 3) {
+		p_indent(level + 1, 0);
+		printf("id %d type %d (%s) status 0x%2.2x (%s)\n",
+			list->id, list->type, ampctrltype2str(list->type), list->status, ampctrlstatus2str(list->status));
+		list++;
+		len -= 3;
+	}
+}
+
+static inline void a2mp_discover_rsp(int level, struct frame *frm, uint16_t len)
+{
+	struct a2mp_discover_rsp *h = frm->ptr;
+	uint16_t mtu = btohs(h->mtu);
+	uint8_t  *octet = (uint8_t *)&(h->mask);
+	uint16_t mask;
+	uint8_t  extension;
+
+	printf("Discover rsp: mtu/mps %d ", mtu);
+	len -= 2;
+
+	printf("mask:");
+
+	do {
+		len -= 2;
+		mask = btohs(*(uint16_t *)(&octet[0]));
+		printf(" 0x%4.4x", mask);
+
+		extension = octet[1] & 0x80;
+		octet += 2;
+	} while ((extension != 0) && (len >= 2));
+
+	printf("\n");
+
+	if (len >= 3) {
+		a2mp_ctrl_list_dump(level + 1, (struct a2mp_ctrl *) octet, len);
+	}
+}
+
+static inline void a2mp_change_notify(int level, struct frame *frm, uint16_t len)
+{
+	struct a2mp_ctrl *list = frm->ptr;
+
+	printf("Change Notify\n");
+
+	if (len >= 3) {
+		a2mp_ctrl_list_dump(level + 1, list, len);
+	}
+}
+
+static inline void a2mp_change_rsp(int level, struct frame *frm)
+{
+	printf("Change Response\n");
+}
+
+static inline void a2mp_info_req(int level, struct frame *frm)
+{
+	struct a2mp_info_req *h = frm->ptr;
+
+	printf("Get Info req: id %d\n", h->id);
+}
+
+static inline void a2mp_info_rsp(int level, struct frame *frm)
+{
+	struct a2mp_info_rsp *h = frm->ptr;
+
+	printf("Get Info rsp: id %d status %d (%s)\n",
+			h->id, h->status, a2mpstatus2str(h->status));
+
+	p_indent(level + 1, 0);
+	printf("Total bandwidth %d\n", btohl(h->total_bw));
+	p_indent(level + 1, 0);
+	printf("Max guaranteed bandwidth %d\n", btohl(h->max_bw));
+	p_indent(level + 1, 0);
+	printf("Min latency %d\n", btohl(h->min_latency));
+	p_indent(level + 1, 0);
+	printf("Pal capabilities 0x%4.4x\n", btohs(h->pal_caps));
+	p_indent(level + 1, 0);
+	printf("Assoc size %d\n", btohs(h->assoc_size));
+}
+
+static inline void a2mp_assoc_req(int level, struct frame *frm)
+{
+	struct a2mp_assoc_req *h = frm->ptr;
+
+	printf("Get AMP Assoc req: id %d\n", h->id);
+}
+
+static inline void a2mp_assoc_dump(int level, uint8_t *assoc, uint16_t len)
+{
+	int i;
+
+	p_indent(level, 0);
+	printf("Assoc data:");
+	for (i = 0; i < len; i++) {
+		if (!(i%16)) {
+			printf("\n");
+			p_indent(level+1, 0);
+		}
+		printf("%2.2x ",*assoc++);
+	}
+	printf("\n");
+}
+
+static inline void a2mp_assoc_rsp(int level, struct frame *frm, uint16_t len)
+{
+	struct a2mp_assoc_rsp *h = frm->ptr;
+
+	printf("Get AMP Assoc rsp: id %d status (%d) %s \n",
+			h->id, h->status, a2mpstatus2str(h->status));
+	a2mp_assoc_dump(level + 1, (uint8_t *) &h->assoc_data, len - 2);
+}
+
+static inline void a2mp_create_req(int level, struct frame *frm, uint16_t len)
+{
+	struct a2mp_create_req *h = frm->ptr;
+
+	printf("Create Physical Link req: local id %d remote id %d\n",
+			h->local_id, h->remote_id);
+	a2mp_assoc_dump(level + 1, (uint8_t *) &h->assoc_data, len - 2);
+}
+
+static inline void a2mp_create_rsp(int level, struct frame *frm)
+{
+	struct a2mp_create_rsp *h = frm->ptr;
+
+	printf("Create Physical Link rsp: local id %d remote id %d status %d\n",
+			h->local_id, h->remote_id, h->status);
+	p_indent(level+1, 0);
+	printf("%s\n", a2mpcplstatus2str(h->status));
+}
+
+static inline void a2mp_disconn_req(int level, struct frame *frm)
+{
+	struct a2mp_disconn_req *h = frm->ptr;
+
+	printf("Disconnect Physical Link req: local id %d remote id %d\n",
+			h->local_id, h->remote_id);
+}
+
+static inline void a2mp_disconn_rsp(int level, struct frame *frm)
+{
+	struct a2mp_disconn_rsp *h = frm->ptr;
+
+	printf("Disconnect Physical Link rsp: local id %d remote id %d status %d\n",
+			h->local_id, h->remote_id, h->status);
+	p_indent(level+1, 0);
+	printf("%s\n", a2mpdplstatus2str(h->status));
 }
 
 static inline void conn_req(int level, struct frame *frm)
@@ -707,6 +990,78 @@ static inline void info_rsp(int level, l2cap_cmd_hdr *cmd, struct frame *frm)
 	}
 }
 
+static inline void create_req(int level, l2cap_cmd_hdr *cmd, struct frame *frm)
+{
+	l2cap_create_req *h = frm->ptr;
+	uint16_t psm = btohs(h->psm);
+	uint16_t scid = btohs(h->scid);
+
+	if (p_filter(FILT_L2CAP))
+		return;
+
+	printf("Create req: psm %d scid 0x%4.4x id %d\n", psm, scid, h->id);
+}
+
+static inline void create_rsp(int level, l2cap_cmd_hdr *cmd, struct frame *frm)
+{
+	l2cap_create_rsp *h = frm->ptr;
+	uint16_t scid = btohs(h->scid);
+	uint16_t dcid = btohs(h->dcid);
+	uint16_t result = btohs(h->result);
+	uint16_t status = btohs(h->status);
+
+	if (p_filter(FILT_L2CAP))
+		return;
+
+	printf("Create rsp: dcid 0x%4.4x scid 0x%4.4x result %d status %d\n", dcid, scid, result, status);
+}
+
+static inline void move_req(int level, l2cap_cmd_hdr *cmd, struct frame *frm)
+{
+	l2cap_move_req *h = frm->ptr;
+	uint16_t icid = btohs(h->icid);
+
+	if (p_filter(FILT_L2CAP))
+		return;
+
+	printf("Move req: icid 0x%4.4x id %d\n", icid, h->id);
+}
+
+static inline void move_rsp(int level, l2cap_cmd_hdr *cmd, struct frame *frm)
+{
+	l2cap_move_rsp *h = frm->ptr;
+	uint16_t icid = btohs(h->icid);
+	uint16_t result = btohs(h->result);
+
+	if (p_filter(FILT_L2CAP))
+		return;
+
+	printf("Move rsp: icid 0x%4.4x result %d\n", icid, result);
+}
+
+static inline void move_cfm(int level, l2cap_cmd_hdr *cmd, struct frame *frm)
+{
+	l2cap_move_cfm *h = frm->ptr;
+	uint16_t icid = btohs(h->icid);
+	uint16_t result = btohs(h->result);
+
+	if (p_filter(FILT_L2CAP))
+		return;
+
+	printf("Move cfm: icid 0x%4.4x result %d\n", icid, result);
+}
+
+static inline void move_cfm_rsp(int level, l2cap_cmd_hdr *cmd, struct frame *frm)
+{
+	l2cap_move_cfm_rsp *h = frm->ptr;
+	uint16_t icid = btohs(h->icid);
+
+	if (p_filter(FILT_L2CAP))
+		return;
+
+	printf("Move cfm rsp: icid 0x%4.4x\n", icid);
+}
+
 static void l2cap_parse(int level, struct frame *frm)
 {
 	l2cap_hdr *hdr = (void *)frm->ptr;
@@ -776,6 +1131,30 @@ static void l2cap_parse(int level, struct frame *frm)
 				info_rsp(level, hdr, frm);
 				break;
 
+			case L2CAP_CREATE_REQ:
+				create_req(level, hdr, frm);
+				break;
+
+			case L2CAP_CREATE_RSP:
+				create_rsp(level, hdr, frm);
+				break;
+
+			case L2CAP_MOVE_REQ:
+				move_req(level, hdr, frm);
+				break;
+
+			case L2CAP_MOVE_RSP:
+				move_rsp(level, hdr, frm);
+				break;
+
+			case L2CAP_MOVE_CFM:
+				move_cfm(level, hdr, frm);
+				break;
+
+			case L2CAP_MOVE_CFM_RSP:
+				move_cfm_rsp(level, hdr, frm);
+				break;
+
 			default:
 				if (p_filter(FILT_L2CAP))
 					break;
@@ -803,6 +1182,76 @@ static void l2cap_parse(int level, struct frame *frm)
 		p_indent(level, frm);
 		printf("L2CAP(c): len %d psm %d\n", dlen, psm);
 		raw_dump(level, frm);
+	} else if (cid == 0x3) {
+		/* AMP Manager channel */
+
+		if (p_filter(FILT_A2MP))
+			return;
+
+		/* Adjust for ERTM control bytes */
+		frm->ptr += 2;
+		frm->len -= 2;
+
+		while (frm->len >= A2MP_HDR_SIZE) {
+			struct a2mp_hdr *hdr = frm->ptr;
+
+			frm->ptr += A2MP_HDR_SIZE;
+			frm->len -= A2MP_HDR_SIZE;
+
+			p_indent(level, frm);
+			printf("A2MP: ");
+
+			switch (hdr->code) {
+			case A2MP_COMMAND_REJ:
+				a2mp_command_rej(level, frm);
+				break;
+			case A2MP_DISCOVER_REQ:
+				a2mp_discover_req(level, frm, btohs(hdr->len));
+				break;
+			case A2MP_DISCOVER_RSP:
+				a2mp_discover_rsp(level, frm, btohs(hdr->len));
+				break;
+			case A2MP_CHANGE_NOTIFY:
+				a2mp_change_notify(level, frm, btohs(hdr->len));
+				break;
+			case A2MP_CHANGE_RSP:
+				a2mp_change_rsp(level, frm);
+				break;
+			case A2MP_INFO_REQ:
+				a2mp_info_req(level, frm);
+				break;
+			case A2MP_INFO_RSP:
+				a2mp_info_rsp(level, frm);
+				break;
+			case A2MP_ASSOC_REQ:
+				a2mp_assoc_req(level, frm);
+				break;
+			case A2MP_ASSOC_RSP:
+				a2mp_assoc_rsp(level, frm, btohs(hdr->len));
+				break;
+			case A2MP_CREATE_REQ:
+				a2mp_create_req(level, frm, btohs(hdr->len));
+				break;
+			case A2MP_CREATE_RSP:
+				a2mp_create_rsp(level, frm);
+				break;
+			case A2MP_DISCONN_REQ:
+				a2mp_disconn_req(level, frm);
+				break;
+			case A2MP_DISCONN_RSP:
+				a2mp_disconn_rsp(level, frm);
+				break;
+			default:
+				printf("code 0x%2.2x ident %d len %d\n",
+					hdr->code, hdr->ident, btohs(hdr->len));
+				raw_dump(level, frm);
+			}
+			if (frm->len > btohs(hdr->len)) {
+				frm->len -= btohs(hdr->len);
+				frm->ptr += btohs(hdr->len);
+			} else
+				frm->len = 0;
+		}
 	} else {
 		/* Connection oriented channel */
 
