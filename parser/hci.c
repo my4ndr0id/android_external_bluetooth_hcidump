@@ -1134,6 +1134,16 @@ static inline void create_physical_link_dump(int level, struct frame *frm)
 	printf("\n");
 }
 
+static inline void disconnect_physical_link_dump(int level, struct frame *frm)
+{
+	disconnect_physical_link_cp *cp = frm->ptr;
+
+	p_indent(level, frm);
+
+	printf("handle %d reason %d\n",
+		cp->handle, cp->reason);
+}
+
 static inline void create_logical_link_dump(int level, struct frame *frm)
 {
 	create_logical_link_cp *cp = frm->ptr;
@@ -1552,6 +1562,29 @@ static inline void request_clock_dump(int level, struct frame *frm)
 					cp->which_clock ? "piconet" : "local");
 }
 
+static inline void write_remote_assoc_dump(int level, struct frame *frm)
+{
+	write_remote_amp_assoc_cp *cp = frm->ptr;
+	int len = frm->len;
+	int i;
+
+	p_indent(level, frm);
+	printf("handle %d length_so_far %d assoc_length %d\n",
+					cp->handle, btohs(cp->length_so_far),
+					btohs(cp->assoc_length));
+	len -= 5;
+	p_indent(level, frm);
+	printf("assoc data");
+	for (i = 0; i < len; i++) {
+		if (!(i % 16)) {
+			printf("\n");
+			p_indent(level, frm);
+		}
+		printf("%2.2x ",cp->fragment[i]);
+	}
+	printf("\n");
+}
+
 static inline void host_buffer_size_dump(int level, struct frame *frm)
 {
 	host_buffer_size_cp *cp = frm->ptr;
@@ -1788,6 +1821,9 @@ static inline void command_dump(int level, struct frame *frm)
 		case OCF_ACCEPT_PHYSICAL_LINK:
 			create_physical_link_dump(level + 1, frm);
 			return;
+		case OCF_DISCONNECT_PHYSICAL_LINK:
+			disconnect_physical_link_dump(level + 1, frm);
+			return;
 		case OCF_CREATE_LOGICAL_LINK:
 		case OCF_ACCEPT_LOGICAL_LINK:
 			create_logical_link_dump(level + 1, frm);
@@ -1946,6 +1982,9 @@ static inline void command_dump(int level, struct frame *frm)
 			return;
 		case OCF_READ_CLOCK:
 			request_clock_dump(level + 1, frm);
+			return;
+		case OCF_WRITE_REMOTE_AMP_ASSOC:
+			write_remote_assoc_dump(level + 1, frm);
 			return;
 		}
 		break;
@@ -2616,7 +2655,7 @@ static inline void read_local_amp_assoc_dump(int level, struct frame *frm)
 	int i;
 
 	p_indent(level, frm);
-	printf("status 0x%2.2x handle 0x%2.2x length %d\n",
+	printf("status 0x%2.2x handle %d length %d\n",
 			rp->status, rp->handle, len);
 	if (rp->status > 0) {
 		p_indent(level, frm);
@@ -2640,7 +2679,7 @@ static inline void write_remote_amp_assoc_dump(int level, struct frame *frm)
 	write_remote_amp_assoc_rp *rp = frm->ptr;
 
 	p_indent(level, frm);
-	printf("status 0x%2.2x handle 0x%2.2x\n", rp->status, rp->handle);
+	printf("status 0x%2.2x handle %d\n", rp->status, rp->handle);
 	if (rp->status > 0) {
 		p_indent(level, frm);
 		printf("Error: %s\n", status2str(rp->status));
